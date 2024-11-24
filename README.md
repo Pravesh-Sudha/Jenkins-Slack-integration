@@ -94,51 +94,67 @@ pip3 install slack_sdk
 Save the following Python script as `jenkins_slack_integration.py`:
 ```python
 import requests
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
+import time
 
-# Jenkins setup
-jenkins_url = "http://localhost:8080"
-job_name = "Jenkins-Python-pipeline"  # Replace with your job name
-jenkins_user = "admin"  # Replace with your Jenkins username
-jenkins_token = "<your_jenkins_token>"  # Replace with your Jenkins API token
+# In my case, I am running Jenkins on my host machine on port 8080. That's why its URL is localhost 
 
-# Slack setup
-slack_webhook_url = "https://slack.com/api/chat.postMessage"
-slack_bot_token = "<your_slack_bot_token>"  # Replace with your Slack bot token
-channel_id = "<your_channel_id>"  # Replace with your channel ID
+JENKINS_USER = "<your-jenkins-user>"  # Mostly its admin
+JENKINS_URL = "http://localhost:8080/job/<job-name>/build"
+JENKINS_API_TOKEN = "<your-jenkins-token>"
+BUILD_STATUS_URL = "http://localhost:8080/job/<Job-name>/lastBuild/api/json"
 
-# Trigger Jenkins Pipeline
-print("Triggering the Pipeline....")
-trigger_url = f"{jenkins_url}/job/{job_name}/build"
-response = requests.post(trigger_url, auth=(jenkins_user, jenkins_token))
+SLACK_CHANNEL = "#devops-updates"
+SLACK_BOT_TOKEN = "<your-slack-bot-token>"
 
-if response.status_code == 201:
-    print("Triggered Pipeline Successfully!!")
-    # Retrieve Build Info
-    print("Checking Build info....")
-    build_info_url = f"{jenkins_url}/job/{job_name}/lastBuild/api/json"
-    build_response = requests.get(build_info_url, auth=(jenkins_user, jenkins_token))
-    if build_response.status_code == 200:
-        build_info = build_response.json()
-        build_status = build_info.get("result", "IN PROGRESS")
-
-        # Send Slack Notification
-        payload = {
-            "channel": channel_id,
-            "text": f"Jenkins Build Status: {build_status}"
-        }
-        headers = {
-            "Authorization": f"Bearer {slack_bot_token}",
-            "Content-Type": "application/json"
-        }
-        slack_response = requests.post(slack_webhook_url, headers=headers, json=payload)
-        if slack_response.status_code == 200 and slack_response.json().get("ok"):
-            print("Slack Notification Sent Successfully!")
-        else:
-            print("Slack notification failed, error:", slack_response.json())
+def trigger_pipeline():
+    print("Triggering the Pipeline....")
+    response = requests.post(
+        url=JENKINS_URL,auth=(JENKINS_USER, JENKINS_API_TOKEN),
+    )
+    if response.status_code == 201:
+        print("Triggered Pipeline Successfully!!")
     else:
-        print("Failed to fetch build info from Jenkins:", build_response.status_code)
-else:
-    print("Failed to trigger Pipeline, response's status code:", response.status_code)
+        print(f"Failed to trigger Pipeline, response's status code: {response.status_code}")
+        response.raise_for_status()
+
+
+def get_build_status():
+    print("Checking Build info....")
+    while True:
+        response = requests.get(BUILD_STATUS_URL, auth= (JENKINS_USER, JENKINS_API_TOKEN),
+                                )
+        if response.status_code == 200:
+            build = response.json()
+            status = build.get('result')
+            if status:
+                return status
+            else:
+                print("Build in progress....")
+                time.sleep(10)
+        else:
+            print(f"Failed to fetch build details! Response's status Code: {response.status_code}")
+            response.raise_for_status()
+
+
+def send_slack_notification(status):
+    client = WebClient(token=SLACK_BOT_TOKEN)
+    try:
+        message = f"Pipeline Completed with status: *{status}* 🚀"
+        response = client.chat_postMessage(channel= SLACK_CHANNEL, text= message)
+        print(f"Slack notification sent: {response['message']['text']}")
+    except Exception as e:
+        print(f"Slack notification failed, error: {e}")
+
+
+if __name__ == "__main__":
+    try:
+        trigger_pipeline()
+        status = get_build_status()
+        send_slack_notification(status)
+    except Exception as e:
+        print(f"Error: {e}") 
 ```
 
 ---
